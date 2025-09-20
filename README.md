@@ -162,7 +162,6 @@ Thank you so much!
 
 | Andras Bacsai | 🏔️ Peak |
 |------------|------------|
-| <img src="https://github.com/andrasbacsai.png" width="200px" alt="Andras Bacsai" /> | <img src="https://github.com/peaklabs-dev.png" width="200px" alt="peaklabs-dev" /> |
 | <a href="https://github.com/andrasbacsai"><img src="https://api.iconify.design/devicon:github.svg" width="25px"></a> <a href="https://x.com/heyandras"><img src="https://api.iconify.design/devicon:twitter.svg" width="25px"></a> <a href="https://bsky.app/profile/heyandras.dev"><img src="https://api.iconify.design/simple-icons:bluesky.svg" width="25px"></a> | <a href="https://github.com/peaklabs-dev"><img src="https://api.iconify.design/devicon:github.svg" width="25px"></a> <a href="https://x.com/peaklabs_dev"><img src="https://api.iconify.design/devicon:twitter.svg" width="25px"></a> <a href="https://bsky.app/profile/peaklabs.dev"><img src="https://api.iconify.design/simple-icons:bluesky.svg" width="25px"></a> |
 
 # Repo Activity
