@@ -23,7 +23,7 @@ class InstallPrerequisites
         if ($supported_os_type->contains('debian')) {
             $command = $command->merge([
                 "echo 'Installing Prerequisites...'",
-                'apt-get update -y',
+                'sudo apt update -y',
                 'command -v curl >/dev/null || apt install -y curl',
                 'command -v wget >/dev/null || apt install -y wget',
                 'command -v git >/dev/null || apt install -y git',

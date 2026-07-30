@@ -359,7 +359,7 @@ echo ""
 log_section "Step 1/9: Installing required packages"
 echo "1/9 Installing required packages (curl, wget, git, jq, openssl)..."
 
-# Track if apt-get update was run to avoid redundant calls later
+# Track if apt update was run to avoid redundant calls later
 APT_UPDATED=false
 
 if all_packages_installed; then
@@ -376,9 +376,9 @@ else
         apk add curl wget git jq openssl >/dev/null
         ;;
     ubuntu | debian | raspbian)
-        apt-get update -y >/dev/null
+        sudo apt update -y >/dev/null
         APT_UPDATED=true
-        apt-get install -y curl wget git jq openssl >/dev/null
+        sudo apt install -y curl wget git jq openssl >/dev/null
         ;;
     centos | fedora | rhel | ol | rocky | almalinux | amzn | tencentos)
         if [ "$OS_TYPE" = "amzn" ]; then
@@ -444,10 +444,10 @@ if [ "$SSH_DETECTED" = "false" ]; then
         ;;
     ubuntu | debian | raspbian)
         if [ "$APT_UPDATED" = false ]; then
-            apt-get update -y >/dev/null
+            sudo apt update -y >/dev/null
             APT_UPDATED=true
         fi
-        apt-get install -y openssh-server >/dev/null
+        sudo apt install -y openssh-server >/dev/null
         systemctl enable ssh >/dev/null 2>&1
         systemctl start ssh >/dev/null 2>&1
         ;;
@@ -511,10 +511,10 @@ install_docker_manually() {
     case "$OS_TYPE" in
     "ubuntu" | "debian" | "raspbian")
         if [ "$APT_UPDATED" = false ]; then
-            apt-get update
+            sudo apt update
             APT_UPDATED=true
         fi
-        apt-get install -y ca-certificates curl
+        sudo apt install -y ca-certificates curl
         install -m 0755 -d /etc/apt/keyrings
         curl -fsSL https://download.docker.com/linux/$OS_TYPE/gpg -o /etc/apt/keyrings/docker.asc
         chmod a+r /etc/apt/keyrings/docker.asc
@@ -524,8 +524,8 @@ install_docker_manually() {
             "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$OS_TYPE \
                   $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" |
             tee /etc/apt/sources.list.d/docker.list
-        apt-get update
-        apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+        sudo apt update
+        sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
         ;;
     *)
         exit 1

@@ -89,7 +89,7 @@ class CheckUpdates
 
                     return $out;
                 case 'apt':
-                    instant_remote_process(['apt-get update -qq'], $server);
+                    instant_remote_process(['sudo apt update -qq'], $server);
                     $output = instant_remote_process(['LANG=C apt list --upgradable 2>/dev/null'], $server);
 
                     $out = $this->parseAptOutput($output);
