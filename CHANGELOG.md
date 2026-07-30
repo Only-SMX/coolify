@@ -6830,6 +6830,7 @@ All notable changes to this project will be documented in this file.
 - *(readme)* Serve sponsor images from Coollabs CDN
 - *(release)* Document SHA image promotion workflow
 - *(release)* Clarify branch strategy and SHA build flow
+- Update changelog
 
 ### ⚡ Performance
 
