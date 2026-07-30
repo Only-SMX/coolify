@@ -2,6 +2,8 @@
 
 namespace App\Jobs;
 
+use App\Events\ServerReachabilityChanged;
+use App\Helpers\SshMultiplexingHelper;
 use App\Models\Server;
 use App\Services\ConfigurationRepository;
 use Illuminate\Bus\Queueable;
@@ -11,7 +13,9 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Queue\TimeoutExceededException;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Process;
 
 class ServerConnectionCheckJob implements ShouldBeEncrypted, ShouldQueue
 {
@@ -19,7 +23,7 @@ class ServerConnectionCheckJob implements ShouldBeEncrypted, ShouldQueue
 
     public $tries = 1;
 
-    public $timeout = 30;
+    public $timeout = 15;
 
     public function __construct(
         public Server $server,
@@ -28,7 +32,7 @@ class ServerConnectionCheckJob implements ShouldBeEncrypted, ShouldQueue
 
     public function middleware(): array
     {
-        return [(new WithoutOverlapping('server-connection-check-'.$this->server->uuid))->expireAfter(45)->dontRelease()];
+        return [(new WithoutOverlapping('server-connection-check-'.$this->server->uuid))->expireAfter(25)->dontRelease()];
     }
 
     private function disableSshMux(): void
@@ -37,8 +41,15 @@ class ServerConnectionCheckJob implements ShouldBeEncrypted, ShouldQueue
         $configRepository->disableSshMux();
     }
 
-    public function handle()
+    public function handle(): void
     {
+        if ($this->server->hasPlaceholderIp()) {
+            return;
+        }
+
+        $wasReachable = (bool) $this->server->settings->is_reachable;
+        $wasNotified = (bool) $this->server->unreachable_notification_sent;
+
         try {
             // Check if server is disabled
             if ($this->server->settings->force_disabled) {
@@ -67,6 +78,7 @@ class ServerConnectionCheckJob implements ShouldBeEncrypted, ShouldQueue
                     'is_reachable' => false,
                     'is_usable' => false,
                 ]);
+                $this->server->increment('unreachable_count');
 
                 Log::warning('ServerConnectionCheck: Server not reachable', [
                     'server_id' => $this->server->id,
@@ -74,39 +86,85 @@ class ServerConnectionCheckJob implements ShouldBeEncrypted, ShouldQueue
                     'server_ip' => $this->server->ip,
                 ]);
 
+                $this->dispatchReachabilityChangedIfNeeded($wasReachable, $wasNotified, false);
+
                 return;
             }
 
             // Server is reachable, check if Docker is available
-            // $isUsable = $this->checkDockerAvailability();
+            $isUsable = $this->checkDockerAvailability();
 
             $this->server->settings->update([
                 'is_reachable' => true,
-                'is_usable' => true,
+                'is_usable' => $isUsable,
             ]);
 
+            if ($this->server->unreachable_count > 0) {
+                $this->server->update(['unreachable_count' => 0]);
+            }
+
+            $this->dispatchReachabilityChangedIfNeeded($wasReachable, $wasNotified, true);
+
         } catch (\Throwable $e) {
+
+            Log::error('ServerConnectionCheckJob failed', [
+                'error' => $e->getMessage(),
+                'server_id' => $this->server->id,
+            ]);
             $this->server->settings->update([
                 'is_reachable' => false,
                 'is_usable' => false,
             ]);
+            $this->server->increment('unreachable_count');
 
-            throw $e;
+            $this->dispatchReachabilityChangedIfNeeded($wasReachable, $wasNotified, false);
+
+            return;
+        }
+    }
+
+    public function failed(?\Throwable $exception): void
+    {
+        if ($exception instanceof TimeoutExceededException) {
+            // Delete the queue job so it doesn't appear in Horizon's failed list.
+            $this->job?->delete();
+        }
+    }
+
+    /**
+     * Fire ServerReachabilityChanged when state crosses the unreachable threshold (count >= 2)
+     * or when a previously-notified server recovers. Skips noise from single transient flaps.
+     */
+    private function dispatchReachabilityChangedIfNeeded(bool $wasReachable, bool $wasNotified, bool $isReachable): void
+    {
+        if ($isReachable) {
+            if (! $wasReachable || $wasNotified) {
+                ServerReachabilityChanged::dispatch($this->server);
+            }
+
+            return;
+        }
+
+        if ($this->server->unreachable_count >= 2 && ! $wasNotified) {
+            ServerReachabilityChanged::dispatch($this->server);
         }
     }
 
     private function checkConnection(): bool
     {
         try {
-            // Use instant_remote_process with a simple command
-            // This will automatically handle mux, sudo, IPv6, Cloudflare tunnel, etc.
-            $output = instant_remote_process_with_timeout(
-                ['ls -la /'],
-                $this->server,
-                false // don't throw error
-            );
+            // Single SSH attempt without SshRetryHandler — retries waste time for connectivity checks.
+            // Backoff is managed at the dispatch level via unreachable_count.
+            $commands = ['ls -la /'];
+            if ($this->server->isNonRoot()) {
+                $commands = parseCommandsByLineForSudo(collect($commands), $this->server);
+            }
+            $commandString = implode("\n", $commands);
 
-            return $output !== null;
+            $sshCommand = SshMultiplexingHelper::generateSshCommand($this->server, $commandString, true);
+            $process = Process::timeout(10)->run($sshCommand);
+
+            return $process->exitCode() === 0;
         } catch (\Throwable $e) {
             Log::debug('ServerConnectionCheck: Connection check failed', [
                 'server_id' => $this->server->id,

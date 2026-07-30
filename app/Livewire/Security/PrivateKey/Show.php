@@ -4,6 +4,7 @@ namespace App\Livewire\Security\PrivateKey;
 
 use App\Models\PrivateKey;
 use App\Support\ValidationPatterns;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Component;
 
@@ -13,15 +14,28 @@ class Show extends Component
 
     public PrivateKey $private_key;
 
+    // Explicit properties
+    public string $name;
+
+    public ?string $description = null;
+
+    public string $privateKeyValue;
+
+    public bool $isGitRelated = false;
+
+    public bool $isInUse = false;
+
     public $public_key = 'Loading...';
+
+    public string $deleteDisabledReason = 'This private key is currently used by a server, application, or Git app and cannot be deleted.';
 
     protected function rules(): array
     {
         return [
-            'private_key.name' => ValidationPatterns::nameRules(),
-            'private_key.description' => ValidationPatterns::descriptionRules(),
-            'private_key.private_key' => 'required|string',
-            'private_key.is_git_related' => 'nullable|boolean',
+            'name' => ValidationPatterns::nameRules(),
+            'description' => ValidationPatterns::descriptionRules(),
+            'privateKeyValue' => 'required|string',
+            'isGitRelated' => 'nullable|boolean',
         ];
     }
 
@@ -30,25 +44,53 @@ class Show extends Component
         return array_merge(
             ValidationPatterns::combinedMessages(),
             [
-                'private_key.name.required' => 'The Name field is required.',
-                'private_key.name.regex' => 'The Name may only contain letters, numbers, spaces, dashes (-), underscores (_), dots (.), slashes (/), colons (:), and parentheses ().',
-                'private_key.description.regex' => 'The Description contains invalid characters. Only letters, numbers, spaces, and common punctuation (- _ . : / () \' " , ! ? @ # % & + = [] {} | ~ ` *) are allowed.',
-                'private_key.private_key.required' => 'The Private Key field is required.',
-                'private_key.private_key.string' => 'The Private Key must be a valid string.',
+                'name.required' => 'The Name field is required.',
+                'privateKeyValue.required' => 'The Private Key field is required.',
+                'privateKeyValue.string' => 'The Private Key must be a valid string.',
             ]
         );
     }
 
     protected $validationAttributes = [
-        'private_key.name' => 'name',
-        'private_key.description' => 'description',
-        'private_key.private_key' => 'private key',
+        'name' => 'name',
+        'description' => 'description',
+        'privateKeyValue' => 'private key',
     ];
 
-    public function mount()
+    /**
+     * Sync data between component properties and model
+     *
+     * @param  bool  $toModel  If true, sync FROM properties TO model. If false, sync FROM model TO properties.
+     */
+    private function syncData(bool $toModel = false): void
+    {
+        if ($toModel) {
+            // Sync TO model (before save)
+            $this->private_key->name = $this->name;
+            $this->private_key->description = $this->description;
+            $this->private_key->private_key = $this->privateKeyValue;
+            $this->private_key->is_git_related = $this->isGitRelated;
+        } else {
+            // Sync FROM model (on load/refresh)
+            $this->name = $this->private_key->name;
+            $this->description = $this->private_key->description;
+            $this->privateKeyValue = $this->private_key->private_key;
+            $this->isGitRelated = $this->private_key->is_git_related;
+        }
+    }
+
+    public function mount(?string $private_key_uuid = null)
     {
         try {
-            $this->private_key = PrivateKey::ownedByCurrentTeam(['name', 'description', 'private_key', 'is_git_related'])->whereUuid(request()->private_key_uuid)->firstOrFail();
+            $this->private_key = PrivateKey::ownedByCurrentTeam(['name', 'description', 'private_key', 'is_git_related', 'team_id'])->whereUuid($private_key_uuid ?? request()->private_key_uuid)->firstOrFail();
+
+            // Explicit authorization check - will throw 403 if not authorized
+            $this->authorize('view', $this->private_key);
+
+            $this->syncData(false);
+            $this->isInUse = $this->private_key->isInUse();
+        } catch (AuthorizationException $e) {
+            abort(403, 'You do not have permission to view this private key.');
         } catch (\Throwable) {
             abort(404);
         }
@@ -66,10 +108,18 @@ class Show extends Component
     {
         try {
             $this->authorize('delete', $this->private_key);
-            $this->private_key->safeDelete();
+
+            if ($this->private_key->isInUse()) {
+                $this->isInUse = true;
+                $this->dispatch('error', $this->deleteDisabledReason);
+
+                return;
+            }
+
+            $this->private_key->delete();
             currentTeam()->privateKeys = PrivateKey::where('team_id', currentTeam()->id)->get();
 
-            return redirect()->route('security.private-key.index');
+            return redirectRoute($this, 'security.private-key.index');
         } catch (\Exception $e) {
             $this->dispatch('error', $e->getMessage());
         } catch (\Throwable $e) {
@@ -81,6 +131,10 @@ class Show extends Component
     {
         try {
             $this->authorize('update', $this->private_key);
+
+            $this->validate();
+
+            $this->syncData(true);
             $this->private_key->updatePrivateKey([
                 'private_key' => formatPrivateKey($this->private_key->private_key),
             ]);

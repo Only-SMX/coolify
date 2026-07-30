@@ -3,7 +3,7 @@
         {{ data_get_str($server, 'name')->limit(10) }} > Destinations | Coolify
     </x-slot>
     <livewire:server.navbar :server="$server" />
-    <div class="flex flex-col h-full gap-8 sm:flex-row">
+    <div class="flex flex-col h-full gap-4 md:gap-8 md:flex-row">
         <x-server.sidebar :server="$server" activeMenu="destinations" />
         <div class="w-full">
             @if ($server->isFunctional())
@@ -20,15 +20,18 @@
                 <h4 class="pt-4 pb-2">Available Destinations</h4>
                 <div class="flex gap-2">
                     @foreach ($server->standaloneDockers as $docker)
-                        <a href="{{ route('destination.show', ['destination_uuid' => data_get($docker, 'uuid')]) }}">
+                        <a href="{{ route('destination.show', ['destination_uuid' => data_get($docker, 'uuid')]) }}" {{ wireNavigate() }}>
                             <x-forms.button>{{ data_get($docker, 'network') }} </x-forms.button>
                         </a>
                     @endforeach
                     @foreach ($server->swarmDockers as $docker)
-                        <a href="{{ route('destination.show', ['destination_uuid' => data_get($docker, 'uuid')]) }}">
+                        <a href="{{ route('destination.show', ['destination_uuid' => data_get($docker, 'uuid')]) }}" {{ wireNavigate() }}>
                             <x-forms.button>{{ data_get($docker, 'network') }} </x-forms.button>
                         </a>
                     @endforeach
+                    @if ($server->standaloneDockers->isEmpty() && $server->swarmDockers->isEmpty())
+                        <div class="text-sm text-neutral-500">No destinations configured for this server yet.</div>
+                    @endif
                 </div>
                 @if ($networks->count() > 0)
                     <div class="pt-2">

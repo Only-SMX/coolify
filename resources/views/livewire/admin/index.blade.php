@@ -17,12 +17,12 @@
         @if ($foundUsers->count() > 0)
             <div class="flex flex-wrap gap-2 pt-4">
                 @foreach ($foundUsers as $user)
-                    <div class="box w-64 group" wire:click="switchUser({{ $user->id }})">
+                    <div class="coolbox w-64 group" wire:click="switchUser({{ $user->id }})">
                         <div class="flex flex-col gap-2">
                             <div class="box-title">{{ $user->name }}</div>
                             <div class="box-description">{{ $user->email }}</div>
                             <div class="box-description">Active:
-                                {{ $user->teams()->whereRelation('subscription', 'stripe_subscription_id', '!=', null)->exists() ? 'Yes' : 'No' }}
+                                {{ $user->teams()->whereRelation('subscription', 'stripe_invoice_paid', true)->exists() ? 'Yes' : 'No' }}
                             </div>
                         </div>
                     </div>

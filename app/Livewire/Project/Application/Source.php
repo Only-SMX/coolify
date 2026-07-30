@@ -3,7 +3,10 @@
 namespace App\Livewire\Project\Application;
 
 use App\Models\Application;
+use App\Models\GithubApp;
+use App\Models\GitlabApp;
 use App\Models\PrivateKey;
+use App\Rules\ValidGitBranch;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\Validate;
@@ -21,16 +24,16 @@ class Source extends Component
     #[Validate(['nullable', 'string'])]
     public ?string $privateKeyName = null;
 
-    #[Validate(['nullable', 'integer'])]
+    #[Locked]
     public ?int $privateKeyId = null;
 
     #[Validate(['required', 'string'])]
     public string $gitRepository;
 
-    #[Validate(['required', 'string'])]
+    #[Validate(['required', 'string', new ValidGitBranch])]
     public string $gitBranch;
 
-    #[Validate(['nullable', 'string'])]
+    #[Validate(['nullable', 'string', 'regex:/^[a-zA-Z0-9][a-zA-Z0-9._\-\/]*$/'])]
     public ?string $gitCommitSha = null;
 
     #[Locked]
@@ -47,6 +50,21 @@ class Source extends Component
         }
     }
 
+    public function updatedGitRepository()
+    {
+        $this->gitRepository = trim($this->gitRepository);
+    }
+
+    public function updatedGitBranch()
+    {
+        $this->gitBranch = trim($this->gitBranch);
+    }
+
+    public function updatedGitCommitSha()
+    {
+        $this->gitCommitSha = trim($this->gitCommitSha);
+    }
+
     public function syncData(bool $toModel = false)
     {
         if ($toModel) {
@@ -57,6 +75,9 @@ class Source extends Component
                 'git_commit_sha' => $this->gitCommitSha,
                 'private_key_id' => $this->privateKeyId,
             ]);
+            // Refresh to get the trimmed values from the model
+            $this->application->refresh();
+            $this->syncData(false);
         } else {
             $this->gitRepository = $this->application->git_repository;
             $this->gitBranch = $this->application->git_branch;
@@ -85,12 +106,14 @@ class Source extends Component
     {
         try {
             $this->authorize('update', $this->application);
-            $this->privateKeyId = $privateKeyId;
+            $key = PrivateKey::ownedByCurrentTeam()->findOrFail($privateKeyId);
+            $this->privateKeyId = $key->id;
             $this->syncData(true);
             $this->getPrivateKeys();
             $this->application->refresh();
             $this->privateKeyName = $this->application->private_key->name;
             $this->dispatch('success', 'Private key updated!');
+            $this->dispatch('configurationChanged');
         } catch (\Throwable $e) {
             return handleError($e, $this);
         }
@@ -106,6 +129,7 @@ class Source extends Component
             }
             $this->syncData(true);
             $this->dispatch('success', 'Application source updated!');
+            $this->dispatch('configurationChanged');
         } catch (\Throwable $e) {
             return handleError($e, $this);
         }
@@ -116,10 +140,14 @@ class Source extends Component
 
         try {
             $this->authorize('update', $this->application);
+            $allowedSourceTypes = [GithubApp::class, GitlabApp::class];
+            abort_unless(in_array($sourceType, $allowedSourceTypes, true), 404);
+            $source = $sourceType::ownedByCurrentTeam()->findOrFail($sourceId);
             $this->application->update([
-                'source_id' => $sourceId,
+                'source_id' => $source->id,
                 'source_type' => $sourceType,
             ]);
+            $this->dispatch('configurationChanged');
 
             ['repository' => $customRepository] = $this->application->customRepository();
             $repository = githubApi($this->application->source, "repos/{$customRepository}");

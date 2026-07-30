@@ -5,11 +5,13 @@ namespace App\Livewire\Project;
 use App\Models\Environment;
 use App\Models\Project;
 use App\Support\ValidationPatterns;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Component;
-use Visus\Cuid2\Cuid2;
 
 class Show extends Component
 {
+    use AuthorizesRequests;
+
     public Project $project;
 
     public string $name;
@@ -41,14 +43,15 @@ class Show extends Component
     public function submit()
     {
         try {
+            $this->authorize('create', Environment::class);
             $this->validate();
             $environment = Environment::create([
                 'name' => $this->name,
                 'project_id' => $this->project->id,
-                'uuid' => (string) new Cuid2,
+                'uuid' => new_public_id(),
             ]);
 
-            return redirect()->route('project.resource.index', [
+            return redirectRoute($this, 'project.resource.index', [
                 'project_uuid' => $this->project->uuid,
                 'environment_uuid' => $environment->uuid,
             ]);
@@ -59,7 +62,7 @@ class Show extends Component
 
     public function navigateToEnvironment($projectUuid, $environmentUuid)
     {
-        return redirect()->route('project.resource.index', [
+        return redirectRoute($this, 'project.resource.index', [
             'project_uuid' => $projectUuid,
             'environment_uuid' => $environmentUuid,
         ]);

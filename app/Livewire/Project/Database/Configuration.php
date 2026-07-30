@@ -2,11 +2,15 @@
 
 namespace App\Livewire\Project\Database;
 
-use Auth;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\ItemNotFoundException;
 use Livewire\Component;
 
 class Configuration extends Component
 {
+    use AuthorizesRequests;
+
     public $currentRoute;
 
     public $database;
@@ -15,15 +19,6 @@ class Configuration extends Component
 
     public $environment;
 
-    public function getListeners()
-    {
-        $teamId = Auth::user()->currentTeam()->id;
-
-        return [
-            "echo-private:team.{$teamId},ServiceChecked" => '$refresh',
-        ];
-    }
-
     public function mount()
     {
         try {
@@ -31,7 +26,7 @@ class Configuration extends Component
 
             $project = currentTeam()
                 ->projects()
-                ->select('id', 'uuid', 'team_id')
+                ->select('id', 'uuid', 'name', 'team_id')
                 ->where('uuid', request()->route('project_uuid'))
                 ->firstOrFail();
             $environment = $project->environments()
@@ -42,6 +37,8 @@ class Configuration extends Component
                 ->where('uuid', request()->route('database_uuid'))
                 ->firstOrFail();
 
+            $this->authorize('view', $database);
+
             $this->database = $database;
             $this->project = $project;
             $this->environment = $environment;
@@ -50,10 +47,10 @@ class Configuration extends Component
                 $this->dispatch('configurationChanged');
             }
         } catch (\Throwable $e) {
-            if ($e instanceof \Illuminate\Auth\Access\AuthorizationException) {
+            if ($e instanceof AuthorizationException) {
                 return redirect()->route('dashboard');
             }
-            if ($e instanceof \Illuminate\Support\ItemNotFoundException) {
+            if ($e instanceof ItemNotFoundException) {
                 return redirect()->route('dashboard');
             }
 

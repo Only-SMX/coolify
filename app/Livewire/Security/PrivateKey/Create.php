@@ -21,6 +21,8 @@ class Create extends Component
 
     public ?string $publicKey = null;
 
+    public bool $modal_mode = false;
+
     protected function rules(): array
     {
         return [
@@ -39,22 +41,6 @@ class Create extends Component
                 'value.string' => 'The Private Key must be a valid string.',
             ]
         );
-    }
-
-    public function generateNewRSAKey()
-    {
-        $this->generateNewKey('rsa');
-    }
-
-    public function generateNewEDKey()
-    {
-        $this->generateNewKey('ed25519');
-    }
-
-    private function generateNewKey($type)
-    {
-        $keyData = PrivateKey::generateNewKeyPair($type);
-        $this->setKeyData($keyData);
     }
 
     public function updated($property)
@@ -77,18 +63,18 @@ class Create extends Component
                 'team_id' => currentTeam()->id,
             ]);
 
+            // If in modal mode, dispatch event and don't redirect
+            if ($this->modal_mode) {
+                $this->dispatch('privateKeyCreated', keyId: $privateKey->id);
+                $this->dispatch('success', 'Private key created successfully.');
+
+                return;
+            }
+
             return $this->redirectAfterCreation($privateKey);
         } catch (\Throwable $e) {
             return handleError($e, $this);
         }
-    }
-
-    private function setKeyData(array $keyData)
-    {
-        $this->name = $keyData['name'];
-        $this->description = $keyData['description'];
-        $this->value = $keyData['private_key'];
-        $this->publicKey = $keyData['public_key'];
     }
 
     private function validatePrivateKey()
@@ -104,7 +90,7 @@ class Create extends Component
     private function redirectAfterCreation(PrivateKey $privateKey)
     {
         return $this->from === 'server'
-            ? redirect()->route('dashboard')
-            : redirect()->route('security.private-key.show', ['private_key_uuid' => $privateKey->uuid]);
+            ? redirectRoute($this, 'dashboard')
+            : redirectRoute($this, 'security.private-key.show', ['private_key_uuid' => $privateKey->uuid]);
     }
 }

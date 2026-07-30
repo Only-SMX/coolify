@@ -3,10 +3,10 @@
 namespace App\Livewire\Project\Application;
 
 use App\Models\ApplicationPreview;
+use App\Support\ValidationPatterns;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Component;
 use Spatie\Url\Url;
-use Visus\Cuid2\Cuid2;
 
 class PreviewsCompose extends Component
 {
@@ -18,6 +18,13 @@ class PreviewsCompose extends Component
 
     public ApplicationPreview $preview;
 
+    public ?string $domain = null;
+
+    public function mount()
+    {
+        $this->domain = data_get($this->service, 'domain');
+    }
+
     public function render()
     {
         return view('livewire.project.application.previews-compose');
@@ -27,11 +34,16 @@ class PreviewsCompose extends Component
     {
         try {
             $this->authorize('update', $this->preview->application);
+            $this->validate([
+                'domain' => ValidationPatterns::applicationDomainRules(),
+            ]);
 
-            $domain = data_get($this->service, 'domain');
+            $this->domain = ValidationPatterns::normalizeApplicationDomains($this->domain);
+
             $docker_compose_domains = data_get($this->preview, 'docker_compose_domains');
-            $docker_compose_domains = json_decode($docker_compose_domains, true);
-            $docker_compose_domains[$this->serviceName]['domain'] = $domain;
+            $docker_compose_domains = json_decode($docker_compose_domains, true) ?: [];
+            $docker_compose_domains[$this->serviceName] = $docker_compose_domains[$this->serviceName] ?? [];
+            $docker_compose_domains[$this->serviceName]['domain'] = $this->domain;
             $this->preview->docker_compose_domains = json_encode($docker_compose_domains);
             $this->preview->save();
             $this->dispatch('update_links');
@@ -46,7 +58,7 @@ class PreviewsCompose extends Component
         try {
             $this->authorize('update', $this->preview->application);
 
-            $domains = collect(json_decode($this->preview->application->docker_compose_domains)) ?? collect();
+            $domains = collect(json_decode($this->preview->application->docker_compose_domains, true) ?: []);
             $domain = $domains->first(function ($_, $key) {
                 return $key === $this->serviceName;
             });
@@ -57,7 +69,7 @@ class PreviewsCompose extends Component
             if (empty($domain_string)) {
                 $server = $this->preview->application->destination->server;
                 $template = $this->preview->application->preview_url_template;
-                $random = new Cuid2;
+                $random = new_public_id();
 
                 // Generate a unique domain like main app services do
                 $generated_fqdn = generateUrl(server: $server, random: $random);
@@ -67,22 +79,44 @@ class PreviewsCompose extends Component
                 $preview_fqdn = str_replace('{{pr_id}}', $this->preview->pull_request_id, $preview_fqdn);
                 $preview_fqdn = str($generated_fqdn)->before('://').'://'.$preview_fqdn;
             } else {
+                foreach (ValidationPatterns::validateApplicationDomains($domain_string) as $error) {
+                    throw new \InvalidArgumentException($error);
+                }
+
                 // Use the existing domain from the main application
-                $url = Url::fromString($domain_string);
+                // Handle multiple domains separated by commas
+                $domain_list = ValidationPatterns::applicationDomainList($domain_string);
+                $preview_fqdns = [];
                 $template = $this->preview->application->preview_url_template;
-                $host = $url->getHost();
-                $schema = $url->getScheme();
-                $random = new Cuid2;
-                $preview_fqdn = str_replace('{{random}}', $random, $template);
-                $preview_fqdn = str_replace('{{domain}}', $host, $preview_fqdn);
-                $preview_fqdn = str_replace('{{pr_id}}', $this->preview->pull_request_id, $preview_fqdn);
-                $preview_fqdn = "$schema://$preview_fqdn";
+                $random = new_public_id();
+
+                foreach ($domain_list as $single_domain) {
+                    $single_domain = trim($single_domain);
+                    if (empty($single_domain)) {
+                        continue;
+                    }
+
+                    $url = Url::fromString($single_domain);
+                    $host = $url->getHost();
+                    $schema = $url->getScheme();
+                    $portInt = $url->getPort();
+                    $port = $portInt !== null ? ':'.$portInt : '';
+
+                    $preview_fqdn = str_replace('{{random}}', $random, $template);
+                    $preview_fqdn = str_replace('{{domain}}', $host, $preview_fqdn);
+                    $preview_fqdn = str_replace('{{pr_id}}', $this->preview->pull_request_id, $preview_fqdn);
+                    $preview_fqdns[] = "$schema://$preview_fqdn{$port}";
+                }
+
+                $preview_fqdn = implode(',', $preview_fqdns);
             }
 
             // Save the generated domain
+            $this->domain = $preview_fqdn;
             $docker_compose_domains = data_get($this->preview, 'docker_compose_domains');
-            $docker_compose_domains = json_decode($docker_compose_domains, true);
-            $docker_compose_domains[$this->serviceName]['domain'] = $this->service->domain = $preview_fqdn;
+            $docker_compose_domains = json_decode($docker_compose_domains, true) ?: [];
+            $docker_compose_domains[$this->serviceName] = $docker_compose_domains[$this->serviceName] ?? [];
+            $docker_compose_domains[$this->serviceName]['domain'] = $this->domain;
             $this->preview->docker_compose_domains = json_encode($docker_compose_domains);
             $this->preview->save();
 

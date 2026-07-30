@@ -3,11 +3,12 @@
 namespace App\Livewire\Server\New;
 
 use App\Enums\ProxyTypes;
+use App\Models\PrivateKey;
 use App\Models\Server;
 use App\Models\Team;
+use App\Rules\ValidServerIp;
 use App\Support\ValidationPatterns;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
-use Illuminate\Support\Collection;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
 
@@ -39,25 +40,12 @@ class ByIp extends Component
 
     public int $port = 22;
 
-    public bool $is_swarm_manager = false;
-
-    public bool $is_swarm_worker = false;
-
-    public $selected_swarm_cluster = null;
-
     public bool $is_build_server = false;
-
-    #[Locked]
-    public Collection $swarm_managers;
 
     public function mount()
     {
         $this->name = generate_random_name();
         $this->private_key_id = $this->private_keys->first()?->id;
-        $this->swarm_managers = Server::isUsable()->get()->where('settings.is_swarm_manager', true);
-        if ($this->swarm_managers->count() > 0) {
-            $this->selected_swarm_cluster = $this->swarm_managers->first()->id;
-        }
     }
 
     protected function rules(): array
@@ -69,12 +57,9 @@ class ByIp extends Component
             'new_private_key_value' => 'nullable|string',
             'name' => ValidationPatterns::nameRules(),
             'description' => ValidationPatterns::descriptionRules(),
-            'ip' => 'required|string',
-            'user' => 'required|string',
+            'ip' => ['required', 'string', new ValidServerIp],
+            'user' => ValidationPatterns::serverUsernameRules(),
             'port' => 'required|integer|between:1,65535',
-            'is_swarm_manager' => 'required|boolean',
-            'is_swarm_worker' => 'required|boolean',
-            'selected_swarm_cluster' => 'nullable|integer',
             'is_build_server' => 'required|boolean',
         ];
     }
@@ -91,22 +76,58 @@ class ByIp extends Component
             'ip.string' => 'The IP Address/Domain must be a string.',
             'user.required' => 'The User field is required.',
             'user.string' => 'The User field must be a string.',
+            ...ValidationPatterns::serverUsernameMessages(),
             'port.required' => 'The Port field is required.',
             'port.integer' => 'The Port field must be an integer.',
             'port.between' => 'The Port field must be between 1 and 65535.',
-            'is_swarm_manager.required' => 'The Swarm Manager field is required.',
-            'is_swarm_manager.boolean' => 'The Swarm Manager field must be true or false.',
-            'is_swarm_worker.required' => 'The Swarm Worker field is required.',
-            'is_swarm_worker.boolean' => 'The Swarm Worker field must be true or false.',
-            'selected_swarm_cluster.integer' => 'The Swarm Cluster field must be an integer.',
             'is_build_server.required' => 'The Build Server field is required.',
             'is_build_server.boolean' => 'The Build Server field must be true or false.',
         ]);
     }
 
+    public function getListeners(): array
+    {
+        return [
+            'privateKeyCreated' => 'handlePrivateKeyCreated',
+        ];
+    }
+
     public function setPrivateKey(string $private_key_id)
     {
         $this->private_key_id = $private_key_id;
+    }
+
+    public function generatePrivateKey(string $type): void
+    {
+        try {
+            $this->authorize('create', PrivateKey::class);
+
+            if (! in_array($type, ['ed25519', 'rsa'], true)) {
+                $this->dispatch('error', 'Invalid private key type.');
+
+                return;
+            }
+
+            $keyData = PrivateKey::generateNewKeyPair($type);
+            $privateKey = PrivateKey::createAndStore([
+                'name' => $keyData['name'],
+                'description' => $keyData['description'],
+                'private_key' => $keyData['private_key'],
+                'team_id' => currentTeam()->id,
+            ]);
+
+            $this->handlePrivateKeyCreated($privateKey->id);
+            $this->dispatch('success', 'Private key created successfully.');
+        } catch (\Throwable $e) {
+            handleError($e, $this);
+        }
+    }
+
+    public function handlePrivateKeyCreated($keyId): void
+    {
+        $this->private_keys = PrivateKey::ownedAndOnlySShKeys()->where('id', '!=', 0)->get();
+        $this->private_key_id = $keyId;
+        $this->resetErrorBag('private_key_id');
     }
 
     public function instantSave()
@@ -119,10 +140,13 @@ class ByIp extends Component
         $this->validate();
         try {
             $this->authorize('create', Server::class);
-            if (Server::where('team_id', currentTeam()->id)
-                ->where('ip', $this->ip)
-                ->exists()) {
-                return $this->dispatch('error', 'This IP/Domain is already in use by another server in your team.');
+            $foundServer = Server::whereIp($this->ip)->first();
+            if ($foundServer) {
+                if ($foundServer->team_id === currentTeam()->id) {
+                    return $this->dispatch('error', 'A server with this IP/Domain already exists in your team.');
+                }
+
+                return $this->dispatch('error', 'A server with this IP/Domain is already in use by another team.');
             }
 
             if (is_null($this->private_key_id)) {
@@ -140,9 +164,6 @@ class ByIp extends Component
                 'team_id' => currentTeam()->id,
                 'private_key_id' => $this->private_key_id,
             ];
-            if ($this->is_swarm_worker) {
-                $payload['swarm_cluster'] = $this->selected_swarm_cluster;
-            }
             if ($this->is_build_server) {
                 data_forget($payload, 'proxy');
             }
@@ -150,17 +171,10 @@ class ByIp extends Component
             $server->proxy->set('status', 'exited');
             $server->proxy->set('type', ProxyTypes::TRAEFIK->value);
             $server->save();
-            if ($this->is_build_server) {
-                $this->is_swarm_manager = false;
-                $this->is_swarm_worker = false;
-            } else {
-                $server->settings->is_swarm_manager = $this->is_swarm_manager;
-                $server->settings->is_swarm_worker = $this->is_swarm_worker;
-            }
             $server->settings->is_build_server = $this->is_build_server;
             $server->settings->save();
 
-            return redirect()->route('server.show', $server->uuid);
+            return redirectRoute($this, 'server.show', [$server->uuid]);
         } catch (\Throwable $e) {
             return handleError($e, $this);
         }

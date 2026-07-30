@@ -30,7 +30,7 @@
             @endif
         </div>
         @if (!isCloud())
-            <div class="w-96">
+            <div class="w-full sm:w-96">
                 <x-forms.checkbox canGate="update" :canResource="$settings" instantSave="instantSave()" id="useInstanceEmailSettings"
                     label="Use system wide (transactional) email settings" />
             </div>
@@ -57,7 +57,7 @@
     @if (!$useInstanceEmailSettings)
         <div class="flex flex-col gap-4">
             <form wire:submit='submitSmtp'
-                class="p-4 border dark:border-coolgray-300 border-neutral-200 flex flex-col gap-2">
+                class="p-4 border dark:border-coolgray-300 border-neutral-200 rounded-lg flex flex-col gap-2">
                 <div class="flex items-center gap-2">
                     <h3>SMTP Server</h3>
                     <x-forms.button canGate="update" :canResource="$settings" type="submit">
@@ -72,7 +72,7 @@
                     <div class="flex flex-col gap-4">
                         <div class="flex flex-col w-full gap-2 xl:flex-row">
                             <x-forms.input canGate="update" :canResource="$settings" required id="smtpHost" placeholder="smtp.mailgun.org" label="Host" />
-                            <x-forms.input canGate="update" :canResource="$settings" required id="smtpPort" placeholder="587" label="Port" />
+                            <x-forms.input canGate="update" :canResource="$settings" required id="smtpPort" type="number" placeholder="587" label="Port" />
                             <x-forms.select canGate="update" :canResource="$settings" required id="smtpEncryption" label="Encryption">
                                 <option value="starttls">StartTLS</option>
                                 <option value="tls">TLS/SSL</option>
@@ -81,15 +81,19 @@
                         </div>
                         <div class="flex flex-col w-full gap-2 xl:flex-row">
                             <x-forms.input canGate="update" :canResource="$settings" id="smtpUsername" label="SMTP Username" />
-                            <x-forms.input canGate="update" :canResource="$settings" id="smtpPassword" type="password" label="SMTP Password" />
-                            <x-forms.input canGate="update" :canResource="$settings" id="smtpTimeout" helper="Timeout value for sending emails."
+                            @can('update', $settings)
+                                <x-forms.input canGate="update" :canResource="$settings" id="smtpPassword" type="password" label="SMTP Password" />
+                            @else
+                                <x-forms.input disabled label="SMTP Password" value="Hidden (only admins can view)" />
+                            @endcan
+                            <x-forms.input canGate="update" :canResource="$settings" id="smtpTimeout" type="number"  helper="Timeout value for sending emails."
                                 label="Timeout" />
                         </div>
                     </div>
                 </div>
             </form>
             <form wire:submit='submitResend'
-                class="p-4 border dark:border-coolgray-300 border-neutral-200 flex flex-col gap-2">
+                class="p-4 border dark:border-coolgray-300 border-neutral-200 rounded-lg flex flex-col gap-2">
                 <div class="flex items-center gap-2">
                     <h3>Resend</h3>
                     <x-forms.button canGate="update" :canResource="$settings" type="submit">
@@ -103,8 +107,12 @@
                 <div class="flex flex-col">
                     <div class="flex flex-col gap-4">
                         <div class="flex flex-col w-full gap-2 xl:flex-row">
-                            <x-forms.input canGate="update" :canResource="$settings" required type="password" id="resendApiKey" placeholder="API key"
-                                label="API Key" />
+                            @can('update', $settings)
+                                <x-forms.input canGate="update" :canResource="$settings" required type="password" id="resendApiKey" placeholder="API key"
+                                    label="API Key" />
+                            @else
+                                <x-forms.input disabled label="API Key" value="Hidden (only admins can view)" />
+                            @endcan
                         </div>
                     </div>
                 </div>
@@ -161,6 +169,8 @@
                     label="Server Unreachable" />
                 <x-forms.checkbox canGate="update" :canResource="$settings" instantSave="saveModel" id="serverPatchEmailNotifications"
                     label="Server Patching" />
+                <x-forms.checkbox canGate="update" :canResource="$settings" instantSave="saveModel" id="traefikOutdatedEmailNotifications"
+                    label="Traefik Proxy Outdated" />
             </div>
         </div>
     </div>

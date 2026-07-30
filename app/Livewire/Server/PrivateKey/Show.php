@@ -5,6 +5,7 @@ namespace App\Livewire\Server\PrivateKey;
 use App\Models\PrivateKey;
 use App\Models\Server;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Facades\DB;
 use Livewire\Component;
 
 class Show extends Component
@@ -35,21 +36,49 @@ class Show extends Component
 
             return;
         }
-
-        $originalPrivateKeyId = $this->server->getOriginal('private_key_id');
         try {
             $this->authorize('update', $this->server);
-            $this->server->update(['private_key_id' => $privateKeyId]);
-            ['uptime' => $uptime, 'error' => $error] = $this->server->validateConnection(justCheckingNewKey: true);
-            if ($uptime) {
-                $this->dispatch('success', 'Private key updated successfully.');
-            } else {
-                throw new \Exception($error);
-            }
+            DB::transaction(function () use ($ownedPrivateKey) {
+                $this->server->privateKey()->associate($ownedPrivateKey);
+                $this->server->save();
+                ['uptime' => $uptime, 'error' => $error] = $this->server->validateConnection(justCheckingNewKey: true);
+                if (! $uptime) {
+                    throw new \Exception($error);
+                }
+            });
+            $this->dispatch('success', 'Private key updated successfully.');
+            $this->dispatch('refreshServerShow');
         } catch (\Exception $e) {
-            $this->server->update(['private_key_id' => $originalPrivateKeyId]);
+            $this->server->refresh();
             $this->server->validateConnection();
             $this->dispatch('error', $e->getMessage());
+        }
+    }
+
+    public function generatePrivateKey(string $type): void
+    {
+        try {
+            $this->authorize('create', PrivateKey::class);
+
+            if (! in_array($type, ['ed25519', 'rsa'], true)) {
+                $this->dispatch('error', 'Invalid private key type.');
+
+                return;
+            }
+
+            $keyData = PrivateKey::generateNewKeyPair($type);
+            $privateKey = PrivateKey::createAndStore([
+                'name' => $keyData['name'],
+                'description' => $keyData['description'],
+                'private_key' => $keyData['private_key'],
+                'team_id' => currentTeam()->id,
+            ]);
+
+            $this->privateKeys = PrivateKey::ownedByCurrentTeam()->get()->where('is_git_related', false);
+            $this->dispatch('copyPublicKeyToClipboard', publicKey: $privateKey->public_key);
+            $this->dispatch('success', 'Private key created successfully.');
+        } catch (\Throwable $e) {
+            handleError($e, $this);
         }
     }
 
@@ -59,8 +88,10 @@ class Show extends Component
             ['uptime' => $uptime, 'error' => $error] = $this->server->validateConnection();
             if ($uptime) {
                 $this->dispatch('success', 'Server is reachable.');
+                $this->dispatch('refreshServerShow');
             } else {
-                $this->dispatch('error', 'Server is not reachable.<br><br>Check this <a target="_blank" class="underline" href="https://coolify.io/docs/knowledge-base/server/openssh">documentation</a> for further help.<br><br>Error: '.$error);
+                $sanitizedError = htmlspecialchars($error ?? '', ENT_QUOTES, 'UTF-8');
+                $this->dispatch('error', 'Server is not reachable.<br><br>Check this <a target="_blank" class="underline" href="https://coolify.io/docs/knowledge-base/server/openssh">documentation</a> for further help.<br><br>Error: '.$sanitizedError);
 
                 return;
             }
