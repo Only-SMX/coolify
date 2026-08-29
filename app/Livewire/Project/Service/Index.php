@@ -282,6 +282,18 @@ class Index extends Component
         }
     }
 
+    public function enablePublicAccess(): void
+    {
+        $this->isPublic = true;
+        $this->instantSave();
+    }
+
+    public function disablePublicAccess(): void
+    {
+        $this->isPublic = false;
+        $this->instantSave();
+    }
+
     public function instantSave()
     {
         try {
@@ -416,7 +428,7 @@ class Index extends Component
             $this->serviceApplication->delete();
             $this->dispatch('success', 'Application deleted.');
 
-            return redirect()->route('project.service.configuration', $this->parameters);
+            return redirectRoute($this, 'project.service.configuration', $this->parameters);
         } catch (\Throwable $e) {
             return handleError($e, $this);
         }
@@ -450,7 +462,7 @@ class Index extends Component
                 $serviceApplication->delete();
             });
 
-            return redirect()->route('project.service.configuration', $redirectParams);
+            return redirectRoute($this, 'project.service.configuration', $redirectParams);
         } catch (\Throwable $e) {
             return handleError($e, $this);
         }
